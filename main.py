@@ -1,37 +1,48 @@
+from collections import deque
 import heapq
 import random
-import time
-from collections import deque
-from math import exp, hypot
+from math import hypot
 from statistics import mean, stdev
+import time
+import matplotlib.animation as animation
 import matplotlib.pyplot as plt
 
 
-# --------------------- Geração da Rede Geográfica --------------------- #
+# ------------------------------ Geração da Rede KNN ------------------------------
 def generate_vertices(n):
+    """Gera n vértices com coordenadas (x, y) aleatórias no plano [0, n]."""
     return [
         {'x': random.randint(0, n), 'y': random.randint(0, n)}
         for _ in range(n)
     ]
 
 
-def generate_edges(vertices, lam):
-    edges = []
+def generate_edges_knn(vertices, k):
+    """Gera arestas conectando cada vértice aos seus k vizinhos mais próximos."""
+    edges_set = set()
     n = len(vertices)
+
     for i in range(n):
-        for j in range(i + 1, n):
-            dx = vertices[j]['x'] - vertices[i]['x']
-            dy = vertices[j]['y'] - vertices[i]['y']
-            s_ij = hypot(dx, dy)
-            p = exp(-lam * s_ij)
-            if random.random() < p:
-                edges.append((i, j, s_ij))
-    return edges
+        distances = []
+        for j in range(n):
+            if i != j:
+                dx = vertices[j]['x'] - vertices[i]['x']
+                dy = vertices[j]['y'] - vertices[i]['y']
+                dist = hypot(dx, dy)
+                distances.append((dist, j))
+
+        nearest_neighbors = heapq.nsmallest(k, distances, key=lambda x: x[0])
+
+        for dist, j in nearest_neighbors:
+            u, v = (i, j) if i < j else (j, i)
+            edges_set.add((u, v, dist))
+
+    return list(edges_set)
 
 
-def generate_geographic_network(n, lam):
+def generate_knn_network(n, k):
     vertices = generate_vertices(n)
-    edges = generate_edges(vertices, lam)
+    edges = generate_edges_knn(vertices, k)
     return vertices, edges
 
 
@@ -44,7 +55,7 @@ def build_adjacency_list(n, edges):
 
 
 def calculate_path_distance(path, adj):
-    """Calcula a distância geográfica total percorrida num caminho."""
+    """Calcula a distância geométrica total percorrida em um caminho."""
     if not path or len(path) < 2:
         return 0.0
     total_dist = 0.0
@@ -58,70 +69,85 @@ def calculate_path_distance(path, adj):
 
 
 def heuristic(node, target, vertices):
-    """Distância euclidiana em linha reta h(n)."""
+    """Calcula a heurística h(n): distância euclidiana em linha reta até o destino."""
     dx = vertices[target]['x'] - vertices[node]['x']
     dy = vertices[target]['y'] - vertices[node]['y']
     return hypot(dx, dy)
 
 
-# --------------------- Algoritmos de Busca Direcionados --------------------- #
+# ------------------------------ Algoritmos de Busca ------------------------------
 def dfs(adj, start, target):
     stack = [(start, [start])]
     visited = set()
-    nodes_expanded = 0
+    visited_order = []
 
     while stack:
         current_node, path = stack.pop()
         if current_node in visited:
             continue
         visited.add(current_node)
-        nodes_expanded += 1
+        visited_order.append(current_node)
 
         if current_node == target:
-            return path, calculate_path_distance(path, adj), nodes_expanded
+            return (
+                path,
+                calculate_path_distance(path, adj),
+                len(visited_order),
+                visited_order,
+            )
 
         for neighbor, _ in adj[current_node]:
             if neighbor not in visited:
                 stack.append((neighbor, path + [neighbor]))
 
-    return None, float('inf'), nodes_expanded
+    return None, float('inf'), len(visited_order), visited_order
 
 
 def bfs(adj, start, target):
     queue = deque([(start, [start])])
     visited = {start}
-    nodes_expanded = 0
+    visited_order = []
 
     while queue:
         current_node, path = queue.popleft()
-        nodes_expanded += 1
+        visited_order.append(current_node)
 
         if current_node == target:
-            return path, calculate_path_distance(path, adj), nodes_expanded
+            return (
+                path,
+                calculate_path_distance(path, adj),
+                len(visited_order),
+                visited_order,
+            )
 
         for neighbor, _ in adj[current_node]:
             if neighbor not in visited:
                 visited.add(neighbor)
                 queue.append((neighbor, path + [neighbor]))
 
-    return None, float('inf'), nodes_expanded
+    return None, float('inf'), len(visited_order), visited_order
 
 
 def greedy_best_first(adj, vertices, start, target):
     start_h = heuristic(start, target, vertices)
     priority_queue = [(start_h, start, [start])]
     visited = set()
-    nodes_expanded = 0
+    visited_order = []
 
     while priority_queue:
         _, current_node, path = heapq.heappop(priority_queue)
         if current_node in visited:
             continue
         visited.add(current_node)
-        nodes_expanded += 1
+        visited_order.append(current_node)
 
         if current_node == target:
-            return path, calculate_path_distance(path, adj), nodes_expanded
+            return (
+                path,
+                calculate_path_distance(path, adj),
+                len(visited_order),
+                visited_order,
+            )
 
         for neighbor, _ in adj[current_node]:
             if neighbor not in visited:
@@ -130,18 +156,22 @@ def greedy_best_first(adj, vertices, start, target):
                     priority_queue, (h_neighbor, neighbor, path + [neighbor])
                 )
 
-    return None, float('inf'), nodes_expanded
+    return None, float('inf'), len(visited_order), visited_order
 
 
 def hill_climbing(adj, vertices, start, target):
     current_node = start
     path = [current_node]
-    nodes_expanded = 0
+    visited_order = [current_node]
 
     while True:
-        nodes_expanded += 1
         if current_node == target:
-            return path, calculate_path_distance(path, adj), nodes_expanded
+            return (
+                path,
+                calculate_path_distance(path, adj),
+                len(visited_order),
+                visited_order,
+            )
 
         current_h = heuristic(current_node, target, vertices)
         best_neighbor = None
@@ -155,26 +185,28 @@ def hill_climbing(adj, vertices, start, target):
 
         if best_neighbor is None:
             # Preso em mínimo local
-            return None, float('inf'), nodes_expanded
+            return None, float('inf'), len(visited_order), visited_order
 
         current_node = best_neighbor
         path.append(current_node)
+        visited_order.append(current_node)
 
 
 def dijkstra(adj, start, target):
     distances = {node: float('inf') for node in adj}
     distances[start] = 0.0
     priority_queue = [(0.0, start, [start])]
-    nodes_expanded = 0
+    visited_order = []
 
     while priority_queue:
         current_dist, current_node, path = heapq.heappop(priority_queue)
         if current_dist > distances[current_node]:
             continue
 
-        nodes_expanded += 1
+        visited_order.append(current_node)
+
         if current_node == target:
-            return path, current_dist, nodes_expanded
+            return path, current_dist, len(visited_order), visited_order
 
         for neighbor, weight in adj[current_node]:
             distance = current_dist + weight
@@ -184,7 +216,7 @@ def dijkstra(adj, start, target):
                     priority_queue, (distance, neighbor, path + [neighbor])
                 )
 
-    return None, float('inf'), nodes_expanded
+    return None, float('inf'), len(visited_order), visited_order
 
 
 def a_star(adj, vertices, start, target):
@@ -192,37 +224,46 @@ def a_star(adj, vertices, start, target):
     g_scores[start] = 0.0
     h_start = heuristic(start, target, vertices)
     priority_queue = [(h_start, start, 0.0, [start])]
-    nodes_expanded = 0
+    visited_order = []
 
     while priority_queue:
         _, current_node, g_score, path = heapq.heappop(priority_queue)
         if g_score > g_scores[current_node]:
             continue
 
-        nodes_expanded += 1
+        visited_order.append(current_node)
+
         if current_node == target:
-            return path, g_score, nodes_expanded
+            return path, g_score, len(visited_order), visited_order
 
         for neighbor, weight in adj[current_node]:
             tentative_g = g_score + weight
             if tentative_g < g_scores[neighbor]:
                 g_scores[neighbor] = tentative_g
-                f_neighbor = tentative_g + heuristic(neighbor, target, vertices)
+                f_neighbor = tentative_g + heuristic(
+                    neighbor, target, vertices
+                )
                 heapq.heappush(
                     priority_queue,
                     (f_neighbor, neighbor, tentative_g, path + [neighbor]),
                 )
 
-    return None, float('inf'), nodes_expanded
+    return None, float('inf'), len(visited_order), visited_order
 
 
-# --------------------- Experimento (i): Visualização --------------------- #
-def plot_experiment_i(vertices, edges, path, title='Visualização da Busca'):
-    plt.figure(figsize=(9, 7))
+# ------------------------------ Experimento 1 ------------------------------
+def animate_search(
+    vertices, edges, visited_order, path, algo_name, filename
+):
+    if not visited_order:
+        print(f'[{algo_name}] Sem passos registrados para animar.')
+        return
 
-    # Desenhar arestas
+    fig, ax = plt.subplots(figsize=(9, 7))
+
+    # Arestas do grafo no fundo
     for u, v, _ in edges:
-        plt.plot(
+        ax.plot(
             [vertices[u]['x'], vertices[v]['x']],
             [vertices[u]['y'], vertices[v]['y']],
             color='gainsboro',
@@ -230,64 +271,85 @@ def plot_experiment_i(vertices, edges, path, title='Visualização da Busca'):
             zorder=1,
         )
 
-    # Desenhar vértices
     x_vals = [v['x'] for v in vertices]
     y_vals = [v['y'] for v in vertices]
-    plt.scatter(
-        x_vals,
-        y_vals,
-        color='skyblue',
-        edgecolor='black',
-        s=60,
-        zorder=2,
-        label='Vértices',
+    ax.scatter(
+        x_vals, y_vals, color='lightgray', edgecolor='black', s=50, zorder=2
     )
 
-    # Destacar o caminho percorrido
-    if path:
-        path_x = [vertices[node]['x'] for node in path]
-        path_y = [vertices[node]['y'] for node in path]
-        plt.plot(
-            path_x,
-            path_y,
-            color='red',
-            linewidth=2.5,
-            marker='o',
-            markersize=5,
-            zorder=3,
-            label='Caminho Solução',
-        )
-        plt.scatter(
-            [path_x[0]],
-            [path_y[0]],
-            color='green',
-            s=120,
-            zorder=4,
-            label='Origem',
-        )
-        plt.scatter(
-            [path_x[-1]],
-            [path_y[-1]],
-            color='purple',
-            s=120,
-            zorder=4,
-            label='Destino',
-        )
+    visited_scatter = ax.scatter(
+        [],
+        [],
+        color='orange',
+        edgecolor='darkorange',
+        s=70,
+        zorder=3,
+        label='Explorado',
+    )
+    (solution_line,) = ax.plot(
+        [],
+        [],
+        color='red',
+        linewidth=3.0,
+        marker='o',
+        markersize=5,
+        zorder=4,
+        label='Caminho Solução',
+    )
 
-    plt.title(title)
-    plt.xlabel('X')
-    plt.ylabel('Y')
-    plt.legend()
-    plt.grid(True, linestyle='--', alpha=0.4)
-    plt.tight_layout()
-    plt.show()
+    start_node = visited_order[0]
+    ax.scatter(
+        [vertices[start_node]['x']],
+        [vertices[start_node]['y']],
+        color='green',
+        s=130,
+        zorder=5,
+        label='Origem',
+    )
+
+    ax.set_title(f'Exploração Espaço de Busca - {algo_name}', fontsize=12)
+    ax.set_xlabel('Coordenada X')
+    ax.set_ylabel('Coordenada Y')
+    ax.legend(loc='upper right')
+    ax.grid(True, linestyle='--', alpha=0.3)
+
+    total_visited = len(visited_order)
+    extra_frames_at_end = 15
+
+    def update(frame):
+        if frame < total_visited:
+            nodes_so_far = visited_order[: frame + 1]
+            xs = [vertices[node]['x'] for node in nodes_so_far]
+            ys = [vertices[node]['y'] for node in nodes_so_far]
+            visited_scatter.set_offsets(list(zip(xs, ys)))
+        else:
+            if path:
+                px = [vertices[node]['x'] for node in path]
+                py = [vertices[node]['y'] for node in path]
+                solution_line.set_data(px, py)
+        return visited_scatter, solution_line
+
+    anim = animation.FuncAnimation(
+        fig,
+        update,
+        frames=total_visited + extra_frames_at_end,
+        interval=40,
+        blit=True,
+    )
+
+    print(f'-> Salvando animação "{filename}"...')
+    anim.save(filename, writer='pillow', fps=20)
+    plt.close(fig)
 
 
 def run_experiment_i():
-    print('=== Experimento (i): Visualização em Rede Pequena (N=150) ===')
+    print('===============================================================')
+    print(' Experimento (i): Animação da Busca em Rede KNN (N=150, k=5)')
+    print('===============================================================')
+
     n_viz = 150
-    lam_viz = 0.03
-    vertices, edges = generate_geographic_network(n_viz, lam_viz)
+    k_viz = 5
+    vertices, edges = generate_knn_network(n_viz, k_viz)
     adj = build_adjacency_list(n_viz, edges)
 
     start, target = 0, n_viz - 1
@@ -304,33 +366,35 @@ def run_experiment_i():
     }
 
     for name, algo_fn in algorithms.items():
-        path, dist, _ = algo_fn()
+        path, dist, nodes, visited_order = algo_fn()
+        filename = f"animations/busca_{name.replace(' ', '_').replace('*', 'Star')}.gif"
+
         if path:
             print(
-                f'[{name}] Distância: {dist:.2f} | Saltos: {len(path)-1} | Caminho: {path}'
+                f'[{name:<17}] Distância: {dist:7.2f} | Saltos: {len(path)-1:3d} | Nós Expandidos: {nodes:3d}'
             )
-            plot_experiment_i(
-                vertices, edges, path, title=f'Experimento i - Algoritmo: {name}'
+            animate_search(
+                vertices, edges, visited_order, path, name, filename
             )
         else:
-            print(f'[{name}] Caminho não encontrado (mínimo local ou desconexo).')
+            print(f'[{name:<17}] Caminho NÃO encontrado (mínimo local).')
 
 
-# --------------------- Experimento (ii): Testes Estatísticos --------------------- #
+# ------------------------------ Experimento 2 ------------------------------
 def run_experiment_ii():
-    print(
-        '\n=== Experimento (ii): Avaliação Estatística em Redes Geográficas (N=2500) ==='
-    )
+    print('\n===============================================================')
+    print(' Experimento (ii): Testes Estatísticos em Redes KNN (N=2500)')
+    print('===============================================================')
+
     n = 2500
-    lambdas = [0.01, 0.02, 0.03]
+    k_values = [3, 7, 11]
     num_pairs = 10
 
-    for lam in lambdas:
-        print(f'\n--- Configuração: (N = {n}, λ = {lam}) ---')
-        vertices, edges = generate_geographic_network(n, lam)
+    for k in k_values:
+        print(f'\n---> Configuração: (N = {n}, k = {k}) <---')
+        vertices, edges = generate_knn_network(n, k)
         adj = build_adjacency_list(n, edges)
 
-        # Selecionar 10 pares distintos de origem e destino
         pairs = []
         while len(pairs) < num_pairs:
             u, v = random.randint(0, n - 1), random.randint(0, n - 1)
@@ -338,60 +402,31 @@ def run_experiment_ii():
                 pairs.append((u, v))
 
         algos = ['BFS', 'DFS', 'Greedy', 'HillClimbing', 'Dijkstra', 'A*']
-        results = {
-            algo: {'dist': [], 'time': []} for algo in algos
-        }
+        results = {algo: {'dist': [], 'time': []} for algo in algos}
 
         for start, target in pairs:
-            # BFS
-            t0 = time.perf_counter()
-            p, d, _ = bfs(adj, start, target)
-            t1 = time.perf_counter()
-            if p:
-                results['BFS']['dist'].append(d)
-                results['BFS']['time'].append(t1 - t0)
+            for name, fn in [
+                ('BFS', lambda: bfs(adj, start, target)),
+                ('DFS', lambda: dfs(adj, start, target)),
+                (
+                    'Greedy',
+                    lambda: greedy_best_first(adj, vertices, start, target),
+                ),
+                (
+                    'HillClimbing',
+                    lambda: hill_climbing(adj, vertices, start, target),
+                ),
+                ('Dijkstra', lambda: dijkstra(adj, start, target)),
+                ('A*', lambda: a_star(adj, vertices, start, target)),
+            ]:
+                t0 = time.perf_counter()
+                p, d, _, _ = fn()
+                t1 = time.perf_counter()
 
-            # DFS
-            t0 = time.perf_counter()
-            p, d, _ = dfs(adj, start, target)
-            t1 = time.perf_counter()
-            if p:
-                results['DFS']['dist'].append(d)
-                results['DFS']['time'].append(t1 - t0)
+                if p:
+                    results[name]['dist'].append(d)
+                    results[name]['time'].append(t1 - t0)
 
-            # Greedy Best-First
-            t0 = time.perf_counter()
-            p, d, _ = greedy_best_first(adj, vertices, start, target)
-            t1 = time.perf_counter()
-            if p:
-                results['Greedy']['dist'].append(d)
-                results['Greedy']['time'].append(t1 - t0)
-
-            # Hill Climbing
-            t0 = time.perf_counter()
-            p, d, _ = hill_climbing(adj, vertices, start, target)
-            t1 = time.perf_counter()
-            if p:
-                results['HillClimbing']['dist'].append(d)
-                results['HillClimbing']['time'].append(t1 - t0)
-
-            # Dijkstra
-            t0 = time.perf_counter()
-            p, d, _ = dijkstra(adj, start, target)
-            t1 = time.perf_counter()
-            if p:
-                results['Dijkstra']['dist'].append(d)
-                results['Dijkstra']['time'].append(t1 - t0)
-
-            # A*
-            t0 = time.perf_counter()
-            p, d, _ = a_star(adj, vertices, start, target)
-            t1 = time.perf_counter()
-            if p:
-                results['A*']['dist'].append(d)
-                results['A*']['time'].append(t1 - t0)
-
-        # Imprimir resultados consolidados
         print(
             f"{'Algoritmo':<15} | {'Dist Média':<12} | {'Tempo Médio (s)':<16} | {'Desvio Padrão Tempo':<18}"
         )
@@ -410,48 +445,50 @@ def run_experiment_ii():
                 print(f'{algo:<15} | Sem caminhos encontrados')
 
 
-# --------------------- Experimento (iii): A* vs. Dijkstra --------------------- #
+# ------------------------------ Experimento 3 ------------------------------
 def run_experiment_iii():
-    print(
-        '\n=== Experimento (iii): Comparativo Direto A* vs. Dijkstra (N=2500, λ=0.01) ==='
-    )
+    print('\n===============================================================')
+    print(' Experimento (iii): Comparativo A* vs. Dijkstra (N=2500, k=7)')
+    print('===============================================================')
+
     n = 2500
-    lam = 0.01
-    vertices, edges = generate_geographic_network(n, lam)
+    k = 7
+    vertices, edges = generate_knn_network(n, k)
     adj = build_adjacency_list(n, edges)
 
     pairs = []
     while len(pairs) < 10:
         u, v = random.randint(0, n - 1), random.randint(0, n - 1)
-        if u != v:
+        if u != v and (u, v) not in pairs:
             pairs.append((u, v))
 
     print(
         f"{'Par (u, v)':<12} | {'Algoritmo':<10} | {'Distância':<10} | {'Nós Expandidos':<15} | {'Tempo (ms)':<10}"
     )
-    print('-' * 65)
+    print('-' * 67)
 
     for u, v in pairs:
         # Dijkstra
         t0 = time.perf_counter()
-        p_dijk, d_dijk, nodes_dijk = dijkstra(adj, u, v)
+        p_dijk, d_dijk, nodes_dijk, _ = dijkstra(adj, u, v)
         t_dijk = (time.perf_counter() - t0) * 1000
 
         # A*
         t0 = time.perf_counter()
-        p_astar, d_astar, nodes_astar = a_star(adj, vertices, u, v)
+        p_astar, d_astar, nodes_astar, _ = a_star(adj, vertices, u, v)
         t_astar = (time.perf_counter() - t0) * 1000
 
         if p_dijk and p_astar:
             print(
-                f'({u:<4}, {v:<4}) | Dijkstra   | {d_dijk:<10.2f} | {nodes_dijk:<15} | {t_dijk:<10.3f}'
+                f'({u:<4}, {v:<4}) | Dijkstra   | {d_dijk:<10.2f} | {nodes_dijk:<15d} | {t_dijk:<10.3f}'
             )
             print(
-                f'({'':<10}) | A*         | {d_astar:<10.2f} | {nodes_astar:<15} | {t_astar:<10.3f}'
+                f'({'':<10}) | A*         | {d_astar:<10.2f} | {nodes_astar:<15d} | {t_astar:<10.3f}'
             )
-            print('-' * 65)
+            print('-' * 67)
 
 
+# ------------------------------ Main ------------------------------
 if __name__ == '__main__':
     run_experiment_i()
     run_experiment_ii()

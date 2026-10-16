@@ -340,24 +340,19 @@ def animate_search(
     print(f'-> Salvando animação "{filename}"...')
     anim.save(filename, writer='pillow', fps=20)
     
-    # --- NOVO TRECHO: Salvar o frame final ---
     img_filename = filename.replace('.gif', '_final.png')
     print(f'-> Salvando frame final "{img_filename}"...')
     
-    # Força a atualização dos pontos explorados para o estado final
     xs = [vertices[node]['x'] for node in visited_order]
     ys = [vertices[node]['y'] for node in visited_order]
     visited_scatter.set_offsets(list(zip(xs, ys)))
     
-    # Força a atualização da linha do caminho para o estado final
     if path:
         px = [vertices[node]['x'] for node in path]
         py = [vertices[node]['y'] for node in path]
         solution_line.set_data(px, py)
         
-    # Salva a figura em alta resolução
     fig.savefig(img_filename, dpi=150, bbox_inches='tight')
-    # -----------------------------------------
 
     plt.close(fig)
 
